@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AUTH REALM</title>
+
+  <!-- Pixel font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+
+  <!-- okta-auth-js: try local build first, CDN fallback handled in app.js -->
+  <script src="/okta-auth-js.min.js"></script>
+  <script>
+    // CDN fallback if local build is not available
+    if (typeof OktaAuth === 'undefined') {
+      document.write('<script src="https://global.oktacdn.com/okta-auth-js/7.4.3/okta-auth-js.min.js"><\/script>');
+    }
+  </script>
+
+  <style>
+    /* ============================================================
+       RESET & BASE
+    ============================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0d1a;
+      --surface:   #1a1a2e;
+      --panel:     #16213e;
+      --border:    #4a4e8c;
+      --accent:    #e94560;
+      --accent2:   #0f3460;
+      --cyan:      #00d4ff;
+      --yellow:    #ffd700;
+      --green:     #39ff14;
+      --white:     #f0f0f0;
+      --dim:       #888aaa;
+      --px: 4px;  /* pixel unit */
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--white);
+      font-family: 'Press Start 2P', monospace;
+      font-size: 10px;
+      line-height: 1.8;
+      image-rendering: pixelated;
+    }
+
+    /* Scanline overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,.15) 2px,
+        rgba(0,0,0,.15) 4px
+      );
+      z-index: 9999;
+    }
+
+    /* ============================================================
+       PIXEL BORDER UTILITY
+       Uses box-shadow to simulate chunky 8-bit border.
+    ============================================================ */
+    .pixel-box {
+      position: relative;
+      background: var(--surface);
+      border: none;
+      /* top / right / bottom / left inset highlights */
+      box-shadow:
+        0    -4px 0 0 var(--border),   /* top */
+        4px   0   0 0 var(--border),   /* right */
+        0     4px 0 0 var(--border),   /* bottom */
+        -4px  0   0 0 var(--border),   /* left */
+        /* inner corners */
+        -4px -4px 0 0 var(--bg),
+         4px -4px 0 0 var(--bg),
+        -4px  4px 0 0 var(--bg),
+         4px  4px 0 0 var(--bg);
+    }
+
+    .pixel-box--accent {
+      box-shadow:
+        0    -4px 0 0 var(--accent),
+        4px   0   0 0 var(--accent),
+        0     4px 0 0 var(--accent),
+        -4px  0   0 0 var(--accent),
+        -4px -4px 0 0 var(--bg),
+         4px -4px 0 0 var(--bg),
+        -4px  4px 0 0 var(--bg),
+         4px  4px 0 0 var(--bg);
+    }
+
+    .pixel-box--cyan {
+      box-shadow:
+        0    -4px 0 0 var(--cyan),
+        4px   0   0 0 var(--cyan),
+        0     4px 0 0 var(--cyan),
+        -4px  0   0 0 var(--cyan),
+        -4px -4px 0 0 var(--bg),
+         4px -4px 0 0 var(--bg),
+        -4px  4px 0 0 var(--bg),
+         4px  4px 0 0 var(--bg);
+    }
+
+    /* ============================================================
+       SCREENS — only one shown at a time
+    ============================================================ */
+    .screen {
+      display: none;
+      min-height: 100vh;
+    }
+    .screen.active { display: flex; }
+
+    /* ============================================================
+       STARS BACKGROUND
+    ============================================================ */
+    @keyframes twinkle {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.2; }
+    }
+
+    .stars {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .stars span {
+      position: absolute;
+      width: 2px;
+      height: 2px;
+      background: var(--white);
+      animation: twinkle var(--d, 3s) var(--delay, 0s) infinite;
+    }
+
+    /* ============================================================
+       LOGIN SCREEN
+    ============================================================ */
+    #screen-login {
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 16px;
+      position: relative;
+    }
+
+    .login-card {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 420px;
+      padding: 40px 32px 36px;
+    }
+
+    /* Pixel character above the card */
+    .pixel-hero {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+
+    .pixel-hero canvas {
+      image-rendering: pixelated;
+      width: 80px;
+      height: 80px;
+    }
+
+    .login-title {
+      text-align: center;
+      font-size: 18px;
+      color: var(--cyan);
+      text-shadow: 0 0 8px var(--cyan), 0 0 20px var(--cyan);
+      margin-bottom: 8px;
+      letter-spacing: 2px;
+    }
+
+    .login-subtitle {
+      text-align: center;
+      font-size: 7px;
+      color: var(--dim);
+      margin-bottom: 32px;
+      letter-spacing: 1px;
+    }
+
+    /* Pixel input */
+    .field {
+      margin-bottom: 20px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 8px;
+      color: var(--yellow);
+      margin-bottom: 8px;
+      letter-spacing: 1px;
+    }
+
+    .field input {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      color: var(--white);
+      font-family: 'Press Start 2P', monospace;
+      font-size: 9px;
+      border: none;
+      outline: none;
+      box-shadow:
+        0   -2px 0 0 var(--border),
+        2px  0   0 0 var(--border),
+        0    2px 0 0 var(--border),
+        -2px 0   0 0 var(--border);
+      transition: box-shadow .15s;
+    }
+
+    .field input:focus {
+      box-shadow:
+        0   -2px 0 0 var(--cyan),
+        2px  0   0 0 var(--cyan),
+        0    2px 0 0 var(--cyan),
+        -2px 0   0 0 var(--cyan);
+      caret-color: var(--cyan);
+    }
+
+    /* Pixel button */
+    .pixel-btn {
+      display: block;
+      width: 100%;
+      padding: 14px 0;
+      background: var(--accent);
+      color: var(--white);
+      font-family: 'Press Start 2P', monospace;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-align: center;
+      border: none;
+      cursor: pointer;
+      box-shadow:
+        0   -4px 0 0 #7a0e23,
+        4px  0   0 0 #7a0e23,
+        0    4px 0 0 #7a0e23,
+        -4px 0   0 0 #7a0e23,
+        -4px -4px 0 0 var(--bg),
+         4px -4px 0 0 var(--bg),
+        -4px  4px 0 0 var(--bg),
+         4px  4px 0 0 var(--bg);
+      transition: transform .08s, box-shadow .08s;
+      user-select: none;
+    }
+
+    .pixel-btn:hover {
+      background: #ff5577;
+    }
+
+    .pixel-btn:active {
+      transform: translateY(2px);
+      box-shadow:
+        0   -2px 0 0 #7a0e23,
+        2px  0   0 0 #7a0e23,
+        0    2px 0 0 #7a0e23,
+        -2px 0   0 0 #7a0e23,
+        -2px -2px 0 0 var(--bg),
+         2px -2px 0 0 var(--bg),
+        -2px  2px 0 0 var(--bg),
+         2px  2px 0 0 var(--bg);
+    }
+
+    .pixel-btn:disabled {
+      opacity: .5;
+      cursor: default;
+    }
+
+    .pixel-btn--cyan {
+      background: var(--cyan);
+      color: var(--bg);
+      box-shadow:
+        0   -4px 0 0 #006888,
+        4px  0   0 0 #006888,
+        0    4px 0 0 #006888,
+        -4px 0   0 0 #006888,
+        -4px -4px 0 0 var(--bg),
+         4px -4px 0 0 var(--bg),
+        -4px  4px 0 0 var(--bg),
+         4px  4px 0 0 var(--bg);
+    }
+
+    .pixel-btn--cyan:hover { background: #33e0ff; }
+
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 20px 0;
+      font-size: 7px;
+      color: var(--dim);
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 2px;
+      background: var(--border);
+    }
+
+    .error-msg {
+      display: none;
+      margin-top: 16px;
+      padding: 10px 12px;
+      background: rgba(233,69,96,.15);
+      border-left: 4px solid var(--accent);
+      font-size: 8px;
+      color: var(--accent);
+      line-height: 1.6;
+    }
+
+    /* blinking cursor effect */
+    @keyframes blink { 50% { opacity: 0; } }
+    .cursor {
+      display: inline-block;
+      width: 8px;
+      height: 12px;
+      background: var(--cyan);
+      animation: blink 1s step-start infinite;
+      vertical-align: middle;
+    }
+
+    /* ============================================================
+       HOME SCREEN
+    ============================================================ */
+    #screen-home {
+      flex-direction: column;
+      min-height: 100vh;
+      position: relative;
+    }
+
+    /* Navbar */
+    .navbar {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+      background: var(--panel);
+      box-shadow: 0 4px 0 0 var(--border);
+    }
+
+    .navbar-brand {
+      font-size: 13px;
+      color: var(--cyan);
+      text-shadow: 0 0 6px var(--cyan);
+      letter-spacing: 2px;
+    }
+
+    .navbar-brand span {
+      color: var(--accent);
+      text-shadow: 0 0 6px var(--accent);
+    }
+
+    .navbar-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .nav-btn {
+      padding: 8px 14px;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 8px;
+      border: none;
+      cursor: pointer;
+      background: var(--surface);
+      color: var(--white);
+      box-shadow:
+        0   -2px 0 0 var(--border),
+        2px  0   0 0 var(--border),
+        0    2px 0 0 var(--border),
+        -2px 0   0 0 var(--border);
+    }
+    .nav-btn:hover { background: var(--border); }
+
+    .nav-btn--danger {
+      color: var(--accent);
+      box-shadow:
+        0   -2px 0 0 var(--accent),
+        2px  0   0 0 var(--accent),
+        0    2px 0 0 var(--accent),
+        -2px 0   0 0 var(--accent);
+    }
+    .nav-btn--danger:hover { background: rgba(233,69,96,.15); }
+
+    /* Main content */
+    .home-main {
+      position: relative;
+      z-index: 1;
+      flex: 1;
+      padding: 32px 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto;
+      gap: 24px;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    @media (max-width: 600px) {
+      .home-main { grid-template-columns: 1fr; }
+    }
+
+    /* Welcome banner */
+    .welcome-banner {
+      grid-column: 1 / -1;
+      padding: 28px 24px;
+    }
+
+    .welcome-tag {
+      font-size: 7px;
+      color: var(--green);
+      text-shadow: 0 0 6px var(--green);
+      letter-spacing: 2px;
+      margin-bottom: 12px;
+    }
+
+    .welcome-name {
+      font-size: 16px;
+      color: var(--white);
+      margin-bottom: 8px;
+      line-height: 1.5;
+    }
+
+    .welcome-name em {
+      color: var(--yellow);
+      font-style: normal;
+    }
+
+    .welcome-sub {
+      font-size: 7px;
+      color: var(--dim);
+    }
+
+    /* Info card */
+    .info-card {
+      padding: 20px;
+    }
+
+    .info-card-title {
+      font-size: 8px;
+      color: var(--cyan);
+      letter-spacing: 1px;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 8px;
+      margin-bottom: 16px;
+    }
+
+    .info-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      font-size: 7px;
+    }
+
+    .info-row .label {
+      color: var(--yellow);
+      min-width: 56px;
+      flex-shrink: 0;
+    }
+
+    .info-row .value {
+      color: var(--white);
+      word-break: break-all;
+    }
+
+    /* Stats card */
+    .stats-card {
+      padding: 20px;
+    }
+
+    .stats-title {
+      font-size: 8px;
+      color: var(--cyan);
+      letter-spacing: 1px;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 8px;
+      margin-bottom: 16px;
+    }
+
+    .stat-bar {
+      margin-bottom: 14px;
+    }
+
+    .stat-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 7px;
+      margin-bottom: 6px;
+    }
+
+    .stat-label .name { color: var(--dim); }
+    .stat-label .val  { color: var(--green); }
+
+    .bar-track {
+      height: 8px;
+      background: var(--bg);
+      box-shadow: 0 0 0 2px var(--border);
+    }
+
+    .bar-fill {
+      height: 100%;
+      background: var(--green);
+      box-shadow: 0 0 4px var(--green);
+      transition: width .6s ease;
+    }
+
+    .bar-fill.yellow { background: var(--yellow); box-shadow: 0 0 4px var(--yellow); }
+    .bar-fill.red    { background: var(--accent); box-shadow: 0 0 4px var(--accent); }
+
+    /* Token card */
+    .token-card {
+      grid-column: 1 / -1;
+      padding: 20px;
+    }
+
+    .token-card-title {
+      font-size: 8px;
+      color: var(--cyan);
+      letter-spacing: 1px;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 8px;
+      margin-bottom: 16px;
+    }
+
+    .token-scroll {
+      background: var(--bg);
+      padding: 12px;
+      font-family: monospace;
+      font-size: 9px;
+      color: var(--green);
+      word-break: break-all;
+      max-height: 80px;
+      overflow-y: auto;
+      box-shadow: inset 0 0 0 2px var(--border);
+    }
+
+    /* Loading screen */
+    #screen-loading {
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .loading-text {
+      font-size: 12px;
+      color: var(--cyan);
+      text-shadow: 0 0 8px var(--cyan);
+    }
+
+    @keyframes spin-px {
+      0%   { transform: rotate(0deg); }
+      25%  { transform: rotate(90deg); }
+      50%  { transform: rotate(180deg); }
+      75%  { transform: rotate(270deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .px-spinner {
+      width: 24px;
+      height: 24px;
+      border: 4px solid var(--border);
+      border-top-color: var(--cyan);
+      animation: spin-px .8s steps(4) infinite;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Star field -->
+  <div class="stars" id="stars"></div>
+
+  <!-- ============================================================
+       LOADING SCREEN
+  ============================================================ -->
+  <div id="screen-loading" class="screen active">
+    <div class="px-spinner"></div>
+    <div class="loading-text">LOADING<span class="cursor"></span></div>
+  </div>
+
+  <!-- ============================================================
+       LOGIN SCREEN
+  ============================================================ -->
+  <div id="screen-login" class="screen">
+
+    <div class="pixel-hero">
+      <canvas id="hero-canvas" width="20" height="20"></canvas>
+    </div>
+
+    <div class="login-card pixel-box--accent">
+      <h1 class="login-title">AUTH<span style="color:var(--accent)">REALM</span></h1>
+      <p class="login-subtitle">// SECURE LOGIN PORTAL v1.0 //</p>
+      <!-- Custom form (direct username/password via OIDC password grant is
+           not recommended — we use Okta-hosted redirect for production.
+           The form below triggers the redirect flow for maximum security.) -->
+      <button class="pixel-btn" id="btn-login-redirect">
+        &gt; LOGIN WITH OKTA
+      </button>
+
+      <div class="divider">OR</div>
+
+      <div class="field">
+        <label for="inp-username">USERNAME</label>
+        <input id="inp-username" type="email" placeholder="hero@example.com" autocomplete="username" />
+      </div>
+
+      <div class="field">
+        <label for="inp-password">PASSWORD</label>
+        <input id="inp-password" type="password" placeholder="••••••••" autocomplete="current-password" />
+      </div>
+
+      <button class="pixel-btn pixel-btn--cyan" id="btn-login-form">
+        &gt; SIGN IN
+      </button>
+
+      <div class="error-msg" id="login-error"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       HOME SCREEN
+  ============================================================ -->
+  <div id="screen-home" class="screen">
+
+    <nav class="navbar">
+      <div class="navbar-brand">PIXEL<span>AUTH</span></div>
+      <div class="navbar-actions">
+        <button class="nav-btn" id="btn-refresh-token">&gt; REFRESH</button>
+        <button class="nav-btn nav-btn--danger" id="btn-logout">&gt; LOGOUT</button>
+      </div>
+    </nav>
+
+    <main class="home-main">
+
+      <!-- Welcome banner -->
+      <div class="welcome-banner pixel-box--cyan">
+        <p class="welcome-tag">// AUTHENTICATED //</p>
+        <p class="welcome-name">WELCOME BACK, <em id="display-name">HERO</em>!</p>
+        <p class="welcome-sub">YOUR QUEST CONTINUES...</p>
+      </div>
+
+      <!-- User info card -->
+      <div class="info-card pixel-box">
+        <div class="info-card-title">USER PROFILE</div>
+        <div class="info-row">
+          <span class="label">NAME</span>
+          <span class="value" id="info-name">-</span>
+        </div>
+        <div class="info-row">
+          <span class="label">EMAIL</span>
+          <span class="value" id="info-email">-</span>
+        </div>
+        <div class="info-row">
+          <span class="label">SUB</span>
+          <span class="value" id="info-sub">-</span>
+        </div>
+        <div class="info-row">
+          <span class="label">LOCALE</span>
+          <span class="value" id="info-locale">-</span>
+        </div>
+      </div>
+
+      <!-- Stats card -->
+      <div class="stats-card pixel-box">
+        <div class="stats-title">SESSION STATS</div>
+
+        <div class="stat-bar">
+          <div class="stat-label">
+            <span class="name">TOKEN HEALTH</span>
+            <span class="val" id="stat-health-val">100%</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill" id="stat-health-bar" style="width:100%"></div>
+          </div>
+        </div>
+
+        <div class="stat-bar">
+          <div class="stat-label">
+            <span class="name">SCOPES</span>
+            <span class="val" id="stat-scopes-val">-</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill yellow" id="stat-scopes-bar" style="width:75%"></div>
+          </div>
+        </div>
+
+        <div class="stat-bar">
+          <div class="stat-label">
+            <span class="name">SECURITY</span>
+            <span class="val">MAX</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill" style="width:100%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Token display -->
+      <div class="token-card pixel-box">
+        <div class="token-card-title">ACCESS TOKEN (raw)</div>
+        <div class="token-scroll" id="token-display">-</div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- App config -->
+  <script src="/config.js"></script>
+
+  <script>
+  'use strict';
+
+  /* ----------------------------------------------------------------
+     STARS
+  ---------------------------------------------------------------- */
+  (function createStars() {
+    const container = document.getElementById('stars');
+    for (let i = 0; i < 80; i++) {
+      const s = document.createElement('span');
+      s.style.left   = Math.random() * 100 + '%';
+      s.style.top    = Math.random() * 100 + '%';
+      s.style['--d']     = (2 + Math.random() * 4) + 's';
+      s.style['--delay'] = (Math.random() * 4) + 's';
+      container.appendChild(s);
+    }
+  })();
+
+  /* ----------------------------------------------------------------
+     PIXEL HERO (canvas character)
+  ---------------------------------------------------------------- */
+  (function drawHero() {
+    const canvas = document.getElementById('hero-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    // 20x20 pixel art character (spaceman/knight)
+    const X = 0, _ = null;
+    const C = '#00d4ff', Y = '#ffd700', W = '#f0f0f0', R = '#e94560', B = '#1a1a2e';
+    const px = [
+      [X,X,X,X,C,C,C,C,C,C,C,C,C,C,C,C,X,X,X,X],
+      [X,X,X,C,C,C,C,C,C,C,C,C,C,C,C,C,C,X,X,X],
+      [X,X,C,C,Y,Y,Y,Y,Y,Y,Y,Y,Y,Y,Y,Y,C,C,X,X],
+      [X,C,C,Y,W,W,W,W,W,W,W,W,W,W,W,W,Y,C,C,X],
+      [X,C,C,Y,W,C,C,C,C,C,C,C,C,C,C,W,Y,C,C,X],
+      [X,C,C,Y,W,C,W,W,W,W,W,W,W,W,C,W,Y,C,C,X],
+      [X,C,C,Y,W,C,W,B,B,B,B,B,B,W,C,W,Y,C,C,X],
+      [X,C,C,Y,W,C,W,B,C,C,C,C,B,W,C,W,Y,C,C,X],
+      [X,C,C,Y,W,C,W,B,C,C,C,C,B,W,C,W,Y,C,C,X],
+      [X,C,C,Y,W,C,W,W,W,W,W,W,W,W,C,W,Y,C,C,X],
+      [X,C,C,Y,W,C,C,C,C,C,C,C,C,C,C,W,Y,C,C,X],
+      [X,C,C,Y,W,W,W,W,W,W,W,W,W,W,W,W,Y,C,C,X],
+      [X,C,C,Y,Y,Y,Y,Y,Y,Y,Y,Y,Y,Y,Y,Y,Y,C,C,X],
+      [X,X,C,C,C,C,R,R,R,R,R,R,R,R,C,C,C,C,X,X],
+      [X,X,X,C,R,R,R,R,R,R,R,R,R,R,R,R,C,X,X,X],
+      [X,X,C,R,R,R,R,R,R,R,R,R,R,R,R,R,R,C,X,X],
+      [X,X,C,R,R,C,C,R,R,R,R,R,R,C,C,R,R,C,X,X],
+      [X,X,C,C,C,C,X,C,R,R,R,R,C,X,C,C,C,C,X,X],
+      [X,X,X,X,X,X,X,C,C,C,C,C,C,X,X,X,X,X,X,X],
+      [X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X],
+    ];
+    px.forEach((row, y) => {
+      row.forEach((color, x) => {
+        if (color) {
+          ctx.fillStyle = color;
+          ctx.fillRect(x, y, 1, 1);
+        }
+      });
+    });
+  })();
+
+  /* ----------------------------------------------------------------
+     SCREEN MANAGEMENT
+  ---------------------------------------------------------------- */
+  const screens = {
+    loading: document.getElementById('screen-loading'),
+    login:   document.getElementById('screen-login'),
+    home:    document.getElementById('screen-home'),
+  };
+
+  function showScreen(name) {
+    Object.values(screens).forEach(s => s.classList.remove('active'));
+    screens[name].classList.add('active');
+  }
+
+  /* ----------------------------------------------------------------
+     OKTA AUTH CLIENT
+  ---------------------------------------------------------------- */
+  var authClient;
+
+  function initAuth() {
+    const cfg = window.OKTA_CONFIG;
+    if (!cfg || !cfg.issuer || cfg.issuer.includes('{your')) {
+      // Demo mode — no real Okta config
+      showScreen('login');
+      document.getElementById('login-error').style.display = 'block';
+      document.getElementById('login-error').textContent =
+        'CONFIG NEEDED: Edit public/config.js with your Okta issuer & clientId.';
+      return;
+    }
+
+    authClient = new OktaAuth({
+      issuer:      cfg.issuer,
+      clientId:    cfg.clientId,
+      redirectUri: cfg.redirectUri,
+      scopes:      cfg.scopes || ['openid', 'profile', 'email'],
+      pkce:        cfg.pkce !== false,
+      tokenManager: { storage: 'sessionStorage' },
+    });
+
+    // Subscribe to auth state changes
+    authClient.authStateManager.subscribe(onAuthStateChange);
+    authClient.start();
+
+    // Handle redirect callback
+    if (authClient.token.isLoginRedirect()) {
+      handleRedirectCallback();
+    } else {
+      authClient.authStateManager.updateAuthState();
+    }
+  }
+
+  async function handleRedirectCallback() {
+    try {
+      const { tokens } = await authClient.token.parseFromUrl();
+      authClient.tokenManager.setTokens(tokens);
+    } catch (err) {
+      showScreen('login');
+      showError('Redirect error: ' + err.message);
+    }
+  }
+
+  function onAuthStateChange(authState) {
+    if (!authState.isAuthenticated) {
+      showScreen('login');
+    } else {
+      loadHomeScreen(authState);
+    }
+  }
+
+  /* ----------------------------------------------------------------
+     HOME SCREEN DATA
+  ---------------------------------------------------------------- */
+  async function loadHomeScreen(authState) {
+    showScreen('home');
+
+    // Access token display
+    const at = authState.accessToken;
+    const tokenEl = document.getElementById('token-display');
+    tokenEl.textContent = at ? at.accessToken : '-';
+
+    // Token health (time remaining %)
+    if (at) {
+      const now    = Math.floor(Date.now() / 1000);
+      const issued = at.claims.iat || now;
+      const exp    = at.expiresAt;
+      const total  = exp - issued;
+      const left   = exp - now;
+      const pct    = Math.max(0, Math.min(100, Math.round((left / total) * 100)));
+      document.getElementById('stat-health-val').textContent = pct + '%';
+      const bar = document.getElementById('stat-health-bar');
+      bar.style.width = pct + '%';
+      if (pct < 30) bar.className = 'bar-fill red';
+      else if (pct < 60) bar.className = 'bar-fill yellow';
+      else bar.className = 'bar-fill';
+    }
+
+    // Scopes
+    const scopes = (at && at.scopes) ? at.scopes : (window.OKTA_CONFIG.scopes || []);
+    document.getElementById('stat-scopes-val').textContent = scopes.length;
+    document.getElementById('stat-scopes-bar').style.width =
+      Math.min(100, (scopes.length / 5) * 100) + '%';
+
+    // User info
+    try {
+      const user = await authClient.getUser();
+      const name = user.name || user.preferred_username || user.email || 'HERO';
+      document.getElementById('display-name').textContent = name.toUpperCase();
+      document.getElementById('info-name').textContent  = user.name || '-';
+      document.getElementById('info-email').textContent = user.email || '-';
+      document.getElementById('info-sub').textContent   = user.sub ? user.sub.substring(0, 20) + '...' : '-';
+      document.getElementById('info-locale').textContent = user.locale || user.zoneinfo || 'en';
+    } catch (err) {
+      document.getElementById('info-name').textContent = '(could not load)';
+    }
+  }
+
+  /* ----------------------------------------------------------------
+     ACTIONS
+  ---------------------------------------------------------------- */
+  function showError(msg) {
+    const el = document.getElementById('login-error');
+    el.style.display = 'block';
+    el.textContent = msg;
+  }
+
+  document.getElementById('btn-login-redirect').addEventListener('click', async () => {
+    if (!authClient) return;
+    try {
+      await authClient.signInWithRedirect();
+    } catch (err) {
+      showError(err.message);
+    }
+  });
+
+  document.getElementById('btn-login-form').addEventListener('click', async () => {
+    if (!authClient) { showError('Configure Okta first.'); return; }
+    const username = document.getElementById('inp-username').value.trim();
+    const password = document.getElementById('inp-password').value;
+    if (!username || !password) { showError('ENTER USERNAME & PASSWORD'); return; }
+    const btn = document.getElementById('btn-login-form');
+    btn.disabled = true;
+    btn.textContent = '> AUTHENTICATING...';
+    try {
+      const transaction = await authClient.signInWithCredentials({ username, password });
+      if (transaction.status === 'SUCCESS') {
+        await authClient.token.getWithRedirect({ sessionToken: transaction.sessionToken });
+      } else {
+        showError('STATUS: ' + transaction.status);
+      }
+    } catch (err) {
+      showError(err.message || 'AUTH FAILED');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '> SIGN IN';
+    }
+  });
+
+  document.getElementById('btn-logout').addEventListener('click', async () => {
+    if (!authClient) return;
+    try {
+      await authClient.signOut();
+    } catch (err) {
+      console.error(err);
+    }
+  });
+
+  document.getElementById('btn-refresh-token').addEventListener('click', async () => {
+    if (!authClient) return;
+    try {
+      await authClient.tokenManager.renew('accessToken');
+    } catch (err) {
+      console.error('Refresh failed', err);
+    }
+  });
+
+  /* ----------------------------------------------------------------
+     BOOT
+  ---------------------------------------------------------------- */
+  window.addEventListener('load', () => {
+    // Small delay so the loading screen is visible
+    setTimeout(initAuth, 400);
+  });
+  </script>
+</body>
+</html>
